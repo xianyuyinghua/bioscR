@@ -57,7 +57,10 @@ identify those samples so that doublet detection is performed accordingly.
 }
 \details{
 Raw counts are read from the \code{counts} layer (Seurat v5), with a fallback to
-the \code{counts} slot used by earlier Seurat versions. The function converts
+the \code{counts} slot used by earlier Seurat versions. If a Seurat v5 assay has
+multiple \code{counts.*} layers, they are first joined into a single \code{counts}
+layer with \code{SeuratObject::JoinLayers()}. The count matrix is then checked
+and reordered to match the cells in the Seurat object. The function converts
 these counts to a \code{SingleCellExperiment}, runs \code{scDblFinder}, and copies
 all output columns whose names begin with \code{scDblFinder.} back to the Seurat
 metadata. It also creates the logical metadata columns \code{is_doublet} and

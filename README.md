@@ -18,9 +18,6 @@ has been published to GitHub, install it with:
 remotes::install_github("xianyuyinghua/bioscR")
 ```
 
-Replace `YOUR_GITHUB_USERNAME` with the GitHub account or organization that
-hosts the repository.
-
 The doublet-detection workflow relies on Bioconductor packages. If necessary,
 install them first:
 

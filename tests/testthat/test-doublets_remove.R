@@ -117,3 +117,60 @@ test_that("predictions are added and cells are optionally filtered", {
   expect_equal(colnames(filtered), c("cell1", "cell3"))
   expect_true(all(filtered$is_singlet))
 })
+
+test_that("multiple Seurat v5 count layers are joined", {
+  skip_if_not_installed("SeuratObject", minimum_version = "5.0.0")
+  skip_if_not_installed("SingleCellExperiment")
+  skip_if_not_installed("SummarizedExperiment")
+  skip_if_not_installed("scDblFinder")
+
+  counts_a <- matrix(
+    c(1, 0, 2, 1),
+    nrow = 2,
+    dimnames = list(c("gene1", "gene2"), c("cell1", "cell2"))
+  )
+  counts_b <- matrix(
+    c(3, 1, 0, 2),
+    nrow = 2,
+    dimnames = list(c("gene1", "gene2"), c("cell3", "cell4"))
+  )
+  seu <- SeuratObject::CreateSeuratObject(
+    counts = list(sample1 = counts_a, sample2 = counts_b)
+  )
+  seu$sample <- c("sample1", "sample1", "sample2", "sample2")
+
+  expect_length(
+    grep(
+      "^counts($|\\.)",
+      SeuratObject::Layers(seu[["RNA"]], search = NA),
+      value = TRUE
+    ),
+    2L
+  )
+
+  fake_scDblFinder <- function(sce, samples = NULL, verbose = TRUE, ...) {
+    expect_identical(colnames(sce), colnames(seu))
+    expect_identical(as.character(samples), as.character(seu$sample))
+    SummarizedExperiment::colData(sce)$scDblFinder.class <- rep(
+      "singlet", ncol(sce)
+    )
+    sce
+  }
+
+  testthat::local_mocked_bindings(
+    scDblFinder = fake_scDblFinder,
+    .package = "scDblFinder"
+  )
+
+  result <- expect_message(
+    doublets_remove(seu, remove_doublets = FALSE, verbose = TRUE),
+    "Joining 2 count layers"
+  )
+
+  expect_identical(
+    SeuratObject::Layers(result[["RNA"]], search = NA),
+    "counts"
+  )
+  expect_equal(ncol(result), 4L)
+  expect_true(all(result$is_singlet))
+})

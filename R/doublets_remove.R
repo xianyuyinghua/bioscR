@@ -29,7 +29,10 @@
 #'
 #' @details
 #' Raw counts are read from the `counts` layer (Seurat v5), with a fallback to
-#' the `counts` slot used by earlier Seurat versions. The function converts
+#' the `counts` slot used by earlier Seurat versions. If a Seurat v5 assay has
+#' multiple `counts.*` layers, they are first joined into a single `counts`
+#' layer with [SeuratObject::JoinLayers()]. The count matrix is then checked
+#' and reordered to match the cells in the Seurat object. The function converts
 #' these counts to a `SingleCellExperiment`, runs `scDblFinder`, and copies all
 #' output columns whose names begin with `scDblFinder.` back to the Seurat
 #' metadata. It also creates the logical metadata columns `is_doublet` and
@@ -96,6 +99,36 @@ doublets_remove <- function(seu,
     )
   }
 
+  # Join split Seurat v5 count layers before extracting the raw UMI matrix.
+  assay_layers <- tryCatch(
+    SeuratObject::Layers(seu[[assay]], search = NA),
+    error = function(e) character()
+  )
+  count_layers <- grep("^counts($|\\.)", assay_layers, value = TRUE)
+  if (length(count_layers) > 1L) {
+    if (verbose) {
+      message(
+        "Joining ", length(count_layers), " count layers in assay '",
+        assay, "': ", paste(count_layers, collapse = ", "), "."
+      )
+    }
+    seu <- tryCatch(
+      SeuratObject::JoinLayers(
+        seu,
+        assay = assay,
+        layers = "counts",
+        new = "counts"
+      ),
+      error = function(e) {
+        stop(
+          "Failed to join count layers in assay '", assay, "': ",
+          conditionMessage(e),
+          call. = FALSE
+        )
+      }
+    )
+  }
+
   # Raw UMI counts: Seurat v5, with a v4 fallback.
   counts <- tryCatch(
     SeuratObject::LayerData(seu, assay = assay, layer = "counts"),
@@ -110,6 +143,14 @@ doublets_remove <- function(seu,
   if (is.null(counts) || nrow(counts) == 0L || ncol(counts) == 0L) {
     stop("Assay '", assay, "' has no non-empty raw counts layer.", call. = FALSE)
   }
+  if (!setequal(colnames(counts), colnames(seu))) {
+    stop(
+      "The raw counts in assay '", assay,
+      "' do not contain exactly the same cells as the Seurat object.",
+      call. = FALSE
+    )
+  }
+  counts <- counts[, colnames(seu), drop = FALSE]
 
   # sample_col identifies independent libraries; use NULL for a single library.
   samples <- NULL
