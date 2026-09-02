@@ -15,6 +15,8 @@ RoxygenNote: 7.3.2
 Depends:
     R (>= 4.1.0)
 Imports:
+    ggplot2,
+    scales,
     scDblFinder,
     SeuratObject,
     SingleCellExperiment,
