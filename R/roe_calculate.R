@@ -201,7 +201,8 @@ roe_calculate <- function(object,
            ifelse(long$p_adjusted < 0.05, "*", ""))
   )
   long$heatmap_label <- paste0(sprintf("%.2f", long$roe),"\n", long$significance)
-
+  long$group <- factor(long$group,levels = levels(meta[[group_col]]))
+    
   if (!requireNamespace("ggplot2", quietly = TRUE) ||
       !requireNamespace("scales", quietly = TRUE)) {
     stop("Packages `ggplot2` and `scales` are required for `result$plot`.",

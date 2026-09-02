@@ -3,3 +3,4 @@
 .Ruserdata
 .Rproj.user/
 *.Rcheck/
+.ipynb_checkpoints/
