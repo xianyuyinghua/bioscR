@@ -133,12 +133,21 @@ roe_calculate <- function(object,
     stop("Metadata column(s) not found: ",
          paste(missing_cols, collapse = ", "), call. = FALSE)
   }
-
-  dat <- data.frame(
-    celltype = as.character(meta[[celltype_col]]),
-    group = as.character(meta[[group_col]]),
-    stringsAsFactors = FALSE
-  )
+    
+  group_levels <- if (is.factor(meta[[group_col]])) {
+      levels(meta[[group_col]])
+  } else {
+      unique(as.character(meta[[group_col]]))
+  }
+    
+  celltype_levels <- if (is.factor(meta[[celltype_col]])) {
+      levels(meta[[celltype_col]])
+  } else {
+      unique(as.character(meta[[celltype_col]]))
+  }
+  dat <- data.frame(celltype = factor(as.character(meta[[celltype_col]]),levels = celltype_levels),
+                    group = factor(as.character(meta[[group_col]]),levels = group_levels)
+                   )
   bad <- is.na(dat$celltype) | is.na(dat$group) |
     !nzchar(trimws(dat$celltype)) | !nzchar(trimws(dat$group))
   n_omitted <- sum(bad)
