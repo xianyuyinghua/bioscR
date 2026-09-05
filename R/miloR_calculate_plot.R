@@ -212,7 +212,8 @@ miloR_calculate_plot <- function(seurat,
     
         # 蜂群图展示celltype logFC变化
         da_results <- annotateNhoods(scmilo, da_results, coldata_col = cell_type_col)
-        da_results$Celltype <- factor(da_results$Celltype,levels = rev(levels(subseurat@meta.data[[cell_type_col]])) )
+        celltype_newlevels <- intersect(rev(levels(subseurat@meta.data[[cell_type_col]])),da_results$Celltype)
+        da_results$Celltype <- factor(da_results$Celltype,levels = celltype_newlevels)
         write.csv(da_results,file = file.path(output_dir,paste0("07_Celltype_Cell_Beeswarm_and_Boxplots_by_group_",paste(group_combinations[[i]],collapse = "_"),".csv")))
     
         plotDAbeeswarm(da_results, group.by = "Celltype", alpha = 1) +
