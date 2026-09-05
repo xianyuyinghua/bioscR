@@ -15,13 +15,27 @@ RoxygenNote: 7.3.2
 Depends:
     R (>= 4.1.0)
 Imports:
+    basicR,
     data.table,
+    dplyr,
+    forcats,
+    ggbeeswarm,
+    ggnewscale,
     ggplot2,
+    miloR,
+    patchwork,
     scales,
+    scater,
     scDblFinder,
+    scran,
+    Seurat,
     SeuratObject,
+    SeuratWrappers,
     SingleCellExperiment,
-    SummarizedExperiment
+    stats,
+    stringr,
+    SummarizedExperiment,
+    utils
 Suggests:
     knitr,
     rmarkdown,
