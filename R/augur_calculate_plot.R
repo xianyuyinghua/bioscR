@@ -50,6 +50,7 @@
 #' dir.create("augur_output", recursive = TRUE, showWarnings = FALSE)
 #' augur_calculate_plot(seurat = seu, output_dir = "augur_output")
 #' }
+#' @export
 augur_calculate_plot <- function(seurat,
                                  cell_type_col = "Celltype",
                                  group_col = "group",

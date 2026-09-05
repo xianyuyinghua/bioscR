@@ -55,6 +55,7 @@
 #'   output_dir = "standard_plots"
 #' )
 #' }
+#' @export
 seurat_standard_plot <- function(seurat = seurat,
                                  reduction = "umap.harmony",
                                  group_by = c("Cluster","Celltype"),

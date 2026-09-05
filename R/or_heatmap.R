@@ -52,6 +52,7 @@
 #' result$data$p_df
 #' }
 
+#' @export
 or_heatmap <- function(seurat = seurat,       # seurat 对象
                        group = "group",       # 样本分组或其他分组
                        celltype = "Celltype",    # 细胞类型列

@@ -15,6 +15,7 @@
 #' @examples
 #' calculate_cell_point_size(10000)
 #' calculate_cell_point_size(c(100, 1000, 10000))
+#' @export
 calculate_cell_point_size <- function(cell_count) {
     # 单细胞定义计算点大小的函数
     a <- exp(3.84342)  # 截距的指数

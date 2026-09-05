@@ -3,3 +3,7 @@
 export(doublets_remove)
 export(roe_calculate)
 S3method(print,roe_result)
+export(augur_calculate_plot)
+export(calculate_cell_point_size)
+export(or_heatmap)
+export(seurat_standard_plot)
