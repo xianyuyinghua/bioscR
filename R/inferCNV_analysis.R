@@ -273,7 +273,7 @@ inferCNV_analysis <- function(seurat,
                              col = list(Celltype = group_color),
                              show_annotation_name = FALSE,
                              show_legend = FALSE,
-                             simple_anno_size = unit(1, "mm")
+                             simple_anno_size = unit(2, "mm")
                             )
 
     # 染色体颜色
@@ -285,7 +285,7 @@ inferCNV_analysis <- function(seurat,
                                    col = list(Chromosome = chr_colors),
                                    show_annotation_name = FALSE,
                                    show_legend = FALSE,
-                                   simple_anno_size = unit(1, "mm")
+                                   simple_anno_size = unit(2, "mm")
                                   )
     # Heatmap
     ht <- Heatmap(mat_plot,
