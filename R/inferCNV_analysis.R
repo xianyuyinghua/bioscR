@@ -140,7 +140,7 @@ inferCNV_analysis <- function(seurat,
         cat("\n",yellow,"Please set the 'ref_name'.",reset,"\n")
         flush.console()
         q("no")
-    }else if(!(ref_name %in% seurat@meta.data[[celltype_col]])){
+    }else if(!all(ref_name %in% seurat@meta.data[[celltype_col]])){
         cat("\n",yellow,"Please Verify the 'ref_name'.",reset,"\n")
         flush.console()
         q("no")        
