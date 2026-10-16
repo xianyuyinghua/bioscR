@@ -155,8 +155,6 @@ visCluster_plot <- function(seurat,
     red <- "\033[31m"
     reset <- "\033[0m"
 
-    source("~/scripts/Function/01_Bio_Data_and_Plot_Function.R")
-
     ########################################
     # 参数检查
     ########################################
