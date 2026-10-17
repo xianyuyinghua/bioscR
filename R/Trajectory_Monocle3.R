@@ -927,7 +927,7 @@ Trajectory_Monocle3 <- function(seurat,
         theme_minimal(base_size = 16)+
         labs(x= "",y = "")+
         theme(panel.grid = element_blank(),
-              legend.title = element_text(size = 10, face = "bold", margin = margin(b = 20),hjust = 0.5),
+              legend.title = element_text(size = 18, face = "bold", margin = margin(b = 20),hjust = 0.5),
               axis.text = element_blank()
              ) -> p
     basicR::save_figure(obj = p,
