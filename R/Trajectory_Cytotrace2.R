@@ -148,6 +148,7 @@ Trajectory_Cytotrace2 <- function(seurat,
                                  ){
 
     library(dplyr)
+    library(ggplot2)
     
     # ANSI 颜色代码
     red <- "\033[31m"
@@ -194,9 +195,9 @@ Trajectory_Cytotrace2 <- function(seurat,
                            point_size = bioscR::calculate_cell_point_size(cell_count = dim(seurat)[2])
                           ){
         
-        dim_df <-  seurat@reductions[[reduction]]@cell.embeddings %>% as.data.frame() %>% rownames_to_column(var = "cell_id")
+        dim_df <-  seurat@reductions[[reduction]]@cell.embeddings %>% as.data.frame() %>% tibble::rownames_to_column(var = "cell_id")
         colnames(dim_df) <- c('cell_id','dim1','dim2')
-        color_df <- seurat@meta.data %>% select(col) %>% as.data.frame() %>% rownames_to_column(var = "cell_id")
+        color_df <- seurat@meta.data %>% select(col) %>% as.data.frame() %>% tibble::rownames_to_column(var = "cell_id")
         colnames(color_df) <- c("cell_id","color")
         df <- merge(color_df,dim_df,by = "cell_id")
         ggplot(df,aes(dim1,dim2,color = color)) +
