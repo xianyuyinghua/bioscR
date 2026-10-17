@@ -146,6 +146,8 @@ Trajectory_Cytotrace2 <- function(seurat,
                                   output_dir = "./04_Pseudotime",
                                   output_rds = "./Rdata/04_Seurat_Celltype_CytoTRACE2.rds"
                                  ){
+
+    library(dplyr)
     
     # ANSI 颜色代码
     red <- "\033[31m"
