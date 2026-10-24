@@ -245,6 +245,12 @@ Drug_DrugReflector <- function(seurat,
                               keep_h5ad = FALSE,
                               formats = c("pdf","png")
                              ){
+
+    suppressPackageStartupMessages({
+        library(dplyr)
+        library(ggplot2)
+        library(basicR)   
+    })
     
     # group_from -> group_to: v = (mean(to) - mean(from)) / sqrt(var(to)+var(from)).
     # All cells in the supplied Seurat object belonging to these two groups are used.
