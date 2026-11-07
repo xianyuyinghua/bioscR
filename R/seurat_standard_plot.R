@@ -245,7 +245,7 @@ seurat_standard_plot <- function(seurat = seurat,
                 if(is.factor(split_var)){
                     grouplevels <- levels(split_var)
                 }else{
-                    grouplevels <- group_new_levels(
+                    grouplevels <- group_order_set(
                         vector = plot_df$Group %>% as.character()
                     )
                 }
