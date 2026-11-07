@@ -68,7 +68,7 @@ or_heatmap <- function(seurat = seurat,       # seurat 对象
         seurat@meta.data[[celltype]] <- factor(seurat@meta.data[[celltype]],levels = unique(seurat@meta.data[[celltype]]))
     }
     if(is.null(levels(seurat@meta.data[[group]]))){
-        seurat@meta.data[[group]] <- factor(seurat@meta.data[[group]],levels = group_new_levels(vector =seurat@meta.data[[group]]) )
+        seurat@meta.data[[group]] <- factor(seurat@meta.data[[group]],levels = group_order_set(vector =seurat@meta.data[[group]]) )
     }
     
     do.tissueDist <- function(cellInfo.tb = cellInfo.tb,
