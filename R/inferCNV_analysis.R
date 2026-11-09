@@ -101,19 +101,18 @@
 inferCNV_analysis <- function(seurat,
                               celltype_col = "Celltype",
                               sample_col = "sample",
-                              species = "human", # huamn/mouse
+                              species = "human",
                               ref_name = NULL,
                               assay = "RNA",
                               heatmap_downsample = NULL,
-                              heatmap_cnv_probs = c(0.025,0.975),
+                              heatmap_cnv_probs = c(0.025, 0.975),
                               celltype_col_colors = basicR::get_colors(number = 50.1),
                               chr_colors = c("#E64B35", "#4DBBD5"),
                               ncor = 10,
                               output_dir = ".",
-                              formats = c("pdf","png")
+                              formats = c("pdf", "png")
                              ){
 
-    # 
     suppressPackageStartupMessages({
         library(dplyr)
         library(ggplot2)
@@ -125,239 +124,535 @@ inferCNV_analysis <- function(seurat,
         library(grid)
     })
 
-    # colors
+    # ============================================================
+    # 0. 参数检查与初始化
+    # ============================================================
+
     red <- "\033[31m"
     green <- "\033[32m"
     yellow <- "\033[33m"
-    blue <- "\033[34m"
     magenta <- "\033[35m"
-    cyan <- "\033[36m"
     reset <- "\033[0m"
 
-    
-    # 参数检查
-    if(is.null(ref_name)){
-        cat("\n",yellow,"Please set the 'ref_name'.",reset,"\n")
-        flush.console()
-        q("no")
-    }else if(!all(ref_name %in% seurat@meta.data[[celltype_col]])){
-        cat("\n",yellow,"Please Verify the 'ref_name'.",reset,"\n")
-        flush.console()
-        q("no")        
+    if (is.null(ref_name) || length(ref_name) == 0) {
+        stop("Please set 'ref_name'.")
     }
 
-    if(is.null(heatmap_downsample)){
-        cat("\n",magenta,"Analysis and Heatmap using all ",dim(seurat)[2]," cells.",reset,"\n")
-        flush.console()
+    if (!all(c(celltype_col, sample_col) %in% colnames(seurat@meta.data))) {
+        stop("Required metadata columns not found.")
     }
-    
-    file_meta <- file.path(output_dir,'cell_meta.rds')
-    if(!file.exists(file_meta)){
-        # 表达量矩阵
-        dat <- GetAssayData(seurat,layer = 'counts',assay = assay)
-        colnames(dat) <- gsub("-", "_", colnames(dat)) # infercnv 不识别特殊符号
-    
-        # 基因信息
-        df_gene <- annoGene(rownames(dat),"SYMBOL",species)
-        df_gene <- df_gene[!df_gene$chr %in% c("chrM", "chrX", "chrY"),]
-        df_gene$chr <- factor(df_gene$chr,levels = paste0("chr",1:22))
-        df_gene <- df_gene %>% arrange(chr,start) %>% dplyr::select("SYMBOL","chr","start","end")
-        df_gene <- df_gene %>% distinct(SYMBOL, .keep_all = TRUE)
-    
-        # 表达数据筛选和排序
-        dat <- dat[rownames(dat) %in% df_gene$SYMBOL,]
-        dat <- dat[match(df_gene$SYMBOL,rownames(dat)),]
-        
-        # 文件制作2：样本的描述
-        df_meta <- seurat@meta.data %>% dplyr::select(sample_col,celltype_col) %>% tibble::rownames_to_column("Cell")
-        df_meta$Cell <- gsub("-", "_", df_meta$Cell)
-        df_meta[[celltype_col]] <- gsub("-", "_", df_meta[[celltype_col]])
-        df_meta[[sample_col]] <- gsub("-", "_", df_meta[[sample_col]])
-        df_meta[[celltype_col]] <- factor(df_meta[[celltype_col]],gsub("-", "_", levels(seurat@meta.data[[celltype_col]])))
-        df_group <- df_meta %>% dplyr::select("Cell",celltype_col)
-    
-        # 保存 表达、基因、样本分组 数据
-        file_exp <- file.path(output_dir,'expFile.txt')
-        file_gene <- file.path(output_dir,'geneFile.txt')
-        file_group <- file.path(output_dir,'groupFiles.txt')
-        
-        write.table(dat, file = file_exp, sep = '\t', quote = F)
-        write.table(df_gene, file = file_gene, sep = '\t',quote = F, col.names = F, row.names = F)
-        write.table(df_group,file = file_group, sep = '\t',quote = F, col.names = F, row.names = F)
-        saveRDS(df_meta,file = file_meta)        
+
+    if (!all(ref_name %in%  as.character(seurat@meta.data[[celltype_col]]))) {
+        stop("Reference cell types not found: ",paste(setdiff(ref_name,unique(as.character(seurat@meta.data[[celltype_col]]))), collapse = ", "))
     }
-    
-    ###########################################   Main   ###############################################
-    file_infercnv_obj2 <- file.path(output_dir,"infercnv_obj_analysis.rds")
-    if(!file.exists(file_infercnv_obj2)){
-        cat("\n",yellow,"Start inferCNV...",reset,"\n")
+
+    if (!is.null(heatmap_downsample)) {
+        if (length(heatmap_downsample) != 1 ||
+            is.na(heatmap_downsample) || 
+            !is.numeric(heatmap_downsample) || 
+            heatmap_downsample < 1 ||
+            heatmap_downsample != floor(heatmap_downsample)) {
+            stop("heatmap_downsample must be NULL or a positive integer.")
+        }
+    }
+
+    if (length(heatmap_cnv_probs) != 2 ||
+        anyNA(heatmap_cnv_probs) ||
+        any(heatmap_cnv_probs < 0 | heatmap_cnv_probs > 1) ||
+        heatmap_cnv_probs[1] >= heatmap_cnv_probs[2]) {
+        stop("Invalid heatmap_cnv_probs.")
+    }
+
+    dir.create(output_dir,recursive = TRUE,showWarnings = FALSE)
+
+    # 统一处理参考细胞名称
+    ref_name <- unique(gsub("-", "_", ref_name))
+
+    # ============================================================
+    # 1. 统一定义输入文件路径
+    # ============================================================
+
+    file_meta <- file.path(output_dir, "cell_meta.rds")
+    file_exp <- file.path(output_dir, "expFile.txt")
+    file_gene <- file.path(output_dir, "geneFile.txt")
+    file_group <- file.path(output_dir, "groupFiles.txt")
+    file_infercnv_obj <- file.path(output_dir, "infercnv_obj.rds")
+    file_infercnv_obj2 <- file.path(output_dir, "infercnv_obj_analysis.rds")
+    infercnv_run_dir <- file.path(output_dir, "infercnv_output")
+
+    # ============================================================
+    # 2. 准备当前细胞元数据
+    # ============================================================
+
+    df_meta_current <- seurat@meta.data %>% dplyr::select(dplyr::all_of(c(sample_col, celltype_col)) ) %>%
+        tibble::rownames_to_column("Cell")
+
+    # 保持与 inferCNV 输入一致的细胞名称
+    df_meta_current$Cell <- gsub("-", "_", df_meta_current$Cell)
+    df_meta_current[[sample_col]] <- gsub("-","_",as.character(df_meta_current[[sample_col]]))
+    df_meta_current[[celltype_col]] <- gsub("-","_",as.character(df_meta_current[[celltype_col]]))
+
+    if (anyDuplicated(df_meta_current$Cell)) {
+        stop("Duplicated cell names after replacing '-' with '_'.")
+    }
+
+    if (anyNA(df_meta_current[[sample_col]]) || anyNA(df_meta_current[[celltype_col]])) {
+        stop("Sample or cell-type metadata contains NA.")
+    }
+
+    original_levels <- if (  is.factor(seurat@meta.data[[celltype_col]])) {
+        levels(seurat@meta.data[[celltype_col]])
+    }else{
+        unique(as.character(seurat@meta.data[[celltype_col]]))
+    }
+
+    original_levels <- unique(gsub("-", "_", original_levels))
+
+    df_meta_current[[celltype_col]] <- factor(df_meta_current[[celltype_col]],levels = original_levels)
+
+    # ============================================================
+    # 3. 检查输入缓存
+    # ============================================================
+
+    input_files <- c(file_meta,file_exp,file_gene,file_group)
+
+    if (!all(file.exists(input_files))) {
+        cat("\n", yellow,"Preparing inferCNV input files...",reset, "\n")
         flush.console()
-        # 创建 inferCNV 对象
-        infercnv_obj <- CreateInfercnvObject(raw_counts_matrix = file_exp,
-                                             annotations_file = file_group,
-                                             delim = "\t",
-                                             gene_order_file = file_gene,
-                                             ref_group_names = ref_name  # 参考
-                                            )
-        saveRDS(infercnv_obj,file = file.path(output_dir,"infercnv_obj.rds"))
-    
-        # Run inferCNV
+
+        # --------------------------------------------------------
+        # 3.1 获取原始 counts
+        # --------------------------------------------------------
+
+        dat <- Seurat::GetAssayData(seurat,assay = assay,layer = "counts")
+        colnames(dat) <- gsub("-", "_", colnames(dat))
+
+        # 确保表达矩阵与元数据对应
+        if (!setequal(colnames(dat),df_meta_current$Cell)) {
+            stop("Counts cell names do not match metadata.")
+        }
+
+        dat <- dat[,df_meta_current$Cell,drop = FALSE]
+
+        # --------------------------------------------------------
+        # 3.2 获取基因染色体位置信息
+        # --------------------------------------------------------
+
+        df_gene <- AnnoProbe::annoGene(rownames(dat),"SYMBOL",species)
+
+        df_gene <- df_gene %>% dplyr::filter(chr %in% paste0("chr", 1:22)) %>%
+            dplyr::mutate( chr = factor(chr,levels = paste0("chr", 1:22))) %>%
+            dplyr::arrange(chr, start) %>% dplyr::select(SYMBOL, chr, start, end) %>%
+            dplyr::distinct(SYMBOL, .keep_all = TRUE)
+
+        df_gene <- df_gene[df_gene$SYMBOL %in% rownames(dat),,drop = FALSE]
+
+        if (nrow(df_gene) == 0) {
+            stop("No genes matched chromosome annotations.")
+        }
+
+        # --------------------------------------------------------
+        # 3.3 按染色体位置排序表达矩阵
+        # --------------------------------------------------------
+
+        dat <- dat[match(df_gene$SYMBOL,rownames(dat)),, drop = FALSE]
+
+        # --------------------------------------------------------
+        # 3.4 制作细胞类型注释
+        # --------------------------------------------------------
+
+        df_meta <- df_meta_current
+        df_group <- df_meta %>%  dplyr::select(Cell,dplyr::all_of(celltype_col))
+
+        # --------------------------------------------------------
+        # 3.5 保存输入文件
+        # --------------------------------------------------------
+
+        write.table(dat,file = file_exp,sep = "\t",quote = FALSE)
+        write.table(df_gene,file = file_gene,sep = "\t",quote = FALSE,col.names = FALSE,row.names = FALSE)
+        write.table(df_group,file = file_group,sep = "\t",quote = FALSE,col.names = FALSE,row.names = FALSE)
+
+        saveRDS(df_meta, file_meta)
+
+        rm(dat, df_gene, df_group)
+        gc()
+
+        cat("\n", green,"Input files prepared.",reset, "\n")
+
+    }else{
+
+        cat("\n", green,"Using existing inferCNV input files.",reset, "\n")
+
+        df_meta <- readRDS(file_meta)
+
+        # 检查缓存是否属于当前细胞数据
+        if (!setequal(df_meta$Cell,df_meta_current$Cell)) {
+            stop("Cached cell metadata differs from current Seurat object. ","Use a new output_dir for a fresh analysis.")
+        }
+
+        old_meta <- df_meta[match(df_meta_current$Cell,df_meta$Cell),,drop = FALSE]
+
+        if (!identical(as.character(old_meta[[sample_col]]),as.character(df_meta_current[[sample_col]])) || !identical(
+            as.character(old_meta[[celltype_col]]),as.character(df_meta_current[[celltype_col]])
+        )) {
+            stop("Cached sample/cell-type metadata has changed. ","Use a new output_dir.")
+        }
+    }
+
+    # ============================================================
+    # 4. 运行 inferCNV
+    # ============================================================
+
+    if (!file.exists(file_infercnv_obj2)) {
+
+        cat("\n", yellow,"Start inferCNV...",reset, "\n")
+        flush.console()
+
+        infercnv_obj <- infercnv::CreateInfercnvObject(raw_counts_matrix = file_exp,
+                                                       annotations_file = file_group,
+                                                       delim = "\t",
+                                                       gene_order_file = file_gene,
+                                                       ref_group_names = ref_name
+                                                      )
+
+        saveRDS(infercnv_obj,file_infercnv_obj)
+
         options(scipen = 100)
+
         infercnv_obj2 <- infercnv::run(infercnv_obj,
-                                       cutoff =  0.1, # smart-seq选择1,10X选择0.1
-                                       out_dir = "infercnv_output", # dir is auto
-                                       cluster_by_groups =  F, #是否根据患者类型(由细胞注释文件中定义)
-                                       hclust_method = "ward.D2",# ward.D2 方法进行层次聚类
-                                       analysis_mode = "subclusters", # 默认是samples，推荐是subclusters
-                                       denoise = TRUE, # 去噪音
-                                       HMM = F,  ##特别耗时间,是否要去背景噪音
-                                       plot_steps = F, #不在每个步骤后生成图形
-                                       inspect_subclusters = FALSE, # 不画 subcluster 检查热图
-                                       no_plot = TRUE, # 不画最终大热图
-                                       leiden_resolution = "auto", #可以手动调参数
-                                       num_threads = ncor # 4线程工作，加快速度
-                                       )
-        saveRDS(infercnv_obj2,file = file_infercnv_obj2)
+                                        cutoff = 0.1,
+                                        out_dir = infercnv_run_dir,
+                                        cluster_by_groups = FALSE,
+                                        hclust_method = "ward.D2",
+                                        analysis_mode = "subclusters",
+                                        denoise = TRUE,
+                                        HMM = FALSE,
+                                        plot_steps = FALSE,
+                                        inspect_subclusters = FALSE,
+                                        no_plot = TRUE,
+                                        leiden_resolution = "auto",
+                                        num_threads = ncor
+                                      )
+
+        saveRDS(infercnv_obj2,file_infercnv_obj2)
+
+        rm(infercnv_obj)
+        gc()
+        cat("\n", green,"inferCNV analysis completed.",reset, "\n")
+    } else {
+        cat("\n", green,"Using cached inferCNV analysis.",reset, "\n")
+        infercnv_obj2 <- readRDS(file_infercnv_obj2)
     }
 
-    
-    #########################################   Plot Heatmap  ###############################################
-    cat("\n",yellow,"Start Heatmap...",reset,"\n")
-    flush.console()
+    # ============================================================
+    # 5. 检查参考细胞与缓存
+    # ============================================================
+
+    cached_ref_names <- names(infercnv_obj2@reference_grouped_cell_indices)
+
+    if (!setequal(cached_ref_names,ref_name)) {
+        stop(
+            "Reference cell types differ from cached inferCNV results.\n",
+            "Current references: ",
+            paste(ref_name, collapse = ", "), "\n",
+            "Cached references: ",
+            paste(cached_ref_names, collapse = ", "), "\n",
+            "Please use a new output_dir."
+        )
+    }
+
     df_meta <- readRDS(file_meta)
-    infercnv_obj2 <- readRDS(file_infercnv_obj2)
-    
+
     cnv_mat <- infercnv_obj2@expr.data
     gene_order <- infercnv_obj2@gene_order
 
-    df_cell_group <- df_meta %>% dplyr::filter(Cell %in% colnames(cnv_mat)) %>% arrange(!!sym(celltype_col))
+    # ============================================================
+    # 6. 热图细胞降采样
+    # ============================================================
 
-    # 降采样出热图
-    if(!is.null(heatmap_downsample)){
-        # 降采样
+    cat("\n", yellow,"Start Heatmap...",reset, "\n")
+    flush.console()
+
+    df_cell_group <- df_meta %>% dplyr::filter( Cell %in% colnames(cnv_mat) ) %>%
+        dplyr::arrange(.data[[celltype_col]])
+
+    if (!is.null(heatmap_downsample)) {
         set.seed(123)
         group_cols <- unique(c(sample_col, celltype_col))
+
         df_cell_group_downsample <- df_cell_group %>%
             dplyr::group_by(dplyr::across(dplyr::all_of(group_cols))) %>%
-            dplyr::group_modify(~ {dplyr::slice_sample(.x, n = min(nrow(.x), heatmap_downsample))}) %>%
-            dplyr::ungroup() %>% dplyr::arrange(.data[[celltype_col]]) %>%
-            dplyr::select("Cell",dplyr::all_of(group_cols))
-        
-        cat("\n\t",magenta,"Heatmap using downsample ",nrow(df_cell_group_downsample)," cells.",reset,"\n")
-        flush.console()
-    }else{
-        # 全采样
+            dplyr::group_modify(
+                ~ {
+                    dplyr::slice_sample(.x,n = min(nrow(.x),heatmap_downsample))
+                }
+            ) %>%
+            dplyr::ungroup() %>%
+            dplyr::arrange(.data[[celltype_col]]) %>%
+            dplyr::select(Cell,dplyr::all_of(group_cols))
+
+        cat("\n\t", magenta,"Heatmap using downsample ",nrow(df_cell_group_downsample)," cells.",reset, "\n")
+
+    } else {
+
         df_cell_group_downsample <- df_cell_group
-        cat("\n\t",magenta,"Heatmap using all ",nrow(df_cell_group_downsample)," cells.",reset,"\n")
-        flush.console()
+
+        cat("\n\t", magenta,"Heatmap using all ",nrow(df_cell_group_downsample)," cells.",reset, "\n")
+
+        if (nrow(df_cell_group_downsample) > 30000) {
+            warning(
+                "Heatmap uses more than 30000 cells. ",
+                "Consider heatmap_downsample to reduce memory usage."
+            )
+        }
     }
-    
-    # 降采样CNV矩阵
-    mat_plot <- cnv_mat[, df_cell_group_downsample$Cell, drop = FALSE] %>% t()
+
+    # ============================================================
+    # 7. 构建热图矩阵
+    # ============================================================
+
+    mat_plot <- t( cnv_mat[,df_cell_group_downsample$Cell, drop = FALSE])
+
     write.csv(mat_plot,file = file.path(output_dir,"01_inferCNV_Heatmap.csv"))
-    
-    # 设置颜色范围
-    q <- quantile(as.numeric(mat_plot), probs = heatmap_cnv_probs, na.rm = TRUE)
-    lim <- max(1 - q[1],q[2] - 1)
+
+    # ============================================================
+    # 8. 热图颜色
+    # ============================================================
+
+    q <- quantile(as.numeric(mat_plot),probs = heatmap_cnv_probs,na.rm = TRUE)
+
+    lim <- max( 1 - q[1], q[2] - 1)
+
+    # 防止颜色断点重复
+    if (!is.finite(lim) || lim <= 0) { lim <- 0.01 }
+
     breaks <- c(1 - lim,1,1 + lim)
-    col_fun <- colorRamp2(breaks,c("#2166AC", "white", "#B2182B"))
 
+    col_fun <- circlize::colorRamp2(breaks,c("#2166AC", "white", "#B2182B"))
 
-    # 分组颜色
+    # ============================================================
+    # 9. 细胞类型颜色注释
+    # ============================================================
+
     group_factor <- df_cell_group_downsample[[celltype_col]]
-    group_color <- setNames(celltype_col_colors[1:length(levels(group_factor))],
-                          levels(group_factor)
-                         )
-    # 左侧细胞分组颜色条
-    ha_left <- rowAnnotation(Celltype = group_factor,
-                             col = list(Celltype = group_color),
-                             show_annotation_name = FALSE,
-                             show_legend = FALSE,
-                             simple_anno_size = unit(2, "mm")
-                            )
 
-    # 染色体颜色
-    # 只显示染色体颜色数字编号
-    chr_factor <- factor(gsub("chr", "", as.character(gene_order$chr)),levels = as.character(1:22))
-    chr_colors <- setNames(rep(chr_colors,length.out = 22),levels(chr_factor))
-    # 底部染色体颜色条
-    ha_bottom <- HeatmapAnnotation(Chromosome = chr_factor,
-                                   col = list(Chromosome = chr_colors),
-                                   show_annotation_name = FALSE,
-                                   show_legend = FALSE,
-                                   simple_anno_size = unit(2, "mm")
-                                  )
-    # Heatmap
-    ht <- Heatmap(mat_plot,
-                  name = "CNV",
-                  col = col_fun,
-                  cluster_rows = FALSE,
-                  cluster_columns = FALSE,
-                  show_row_names = FALSE,
-                  show_column_names = FALSE,
-                  row_split = group_factor, # 按 Epi 分块
-                  column_split = chr_factor, # 按染色体分块
-                  row_title = "%s", # 每个 Epi slice 只显示一次名称
-                  row_title_side = "left",
-                  row_title_rot = 0,
-                  row_title_gp = gpar(fontsize = 11,fontface = "bold"),
-                  left_annotation = ha_left, # 左侧细胞分类颜色条
-                  column_title = "%s", # 染色体编号
-                  column_title_side = "bottom",
-                  column_title_gp = gpar(fontsize = 11,fontface = "bold"),
-                  bottom_annotation = ha_bottom, # 底部染色体颜色条
-                  row_gap = unit(2, "mm"), # 行间距
-                  column_gap = unit(2, "mm"), # 列间距
-                  use_raster = TRUE, # 栅格化处理
-                  raster_quality = 10 # 栅格化清晰度
-                 )
-    
-    basicR::save_figure(obj = draw(ht,padding = unit(c(10, 10, 10, 5), "mm")),
-                    filename =  file.path(output_dir, "01_inferCNV_Heatmap"),
-                    width = 13,
-                    height = min(8, max(6,nrow(mat_plot) * 0.0005)),
-                    res = 600,
-                    formats = formats  # "pdf","tiff","png","svg"
-                   )
+    if (!is.factor(group_factor)) {
+        group_factor <- factor(group_factor)
+    }
 
-    ############################################  Plot box  ###########################################
-    cat("\n",yellow,"Start Boxplot...",reset,"\n")
-    flush.console()
-    tmp <- cnv_mat[,infercnv_obj2@reference_grouped_cell_indices[[ref_name]], drop = FALSE]
+    group_factor <- droplevels(group_factor)
 
-    down <- mean(rowMeans(tmp)) - 2 * mean(apply(tmp, 1, sd))
-    up   <- mean(rowMeans(tmp)) + 2 * mean(apply(tmp, 1, sd))
-    
+    n_celltypes <- nlevels(group_factor)
+
+    if (length(celltype_col_colors) < n_celltypes) {
+        stop("Not enough celltype_col_colors.")
+    }
+
+    group_color <- setNames(celltype_col_colors[seq_len(n_celltypes)], levels(group_factor))
+
+    ha_left <- ComplexHeatmap::rowAnnotation(
+        Celltype = group_factor,
+        col = list(Celltype = group_color),
+        show_annotation_name = FALSE,
+        show_legend = FALSE,
+        simple_anno_size = grid::unit(2, "mm")
+    )
+
+    # ============================================================
+    # 10. 染色体注释
+    # ============================================================
+
+    chr_factor <- factor(gsub("chr","",as.character(gene_order$chr)),levels = as.character(1:22))
+
+    chr_color_map <- setNames(rep(chr_colors,length.out = 22),levels(chr_factor))
+
+    ha_bottom <- ComplexHeatmap::HeatmapAnnotation(
+        Chromosome = chr_factor,
+        col = list(
+            Chromosome = chr_color_map
+        ),
+        show_annotation_name = FALSE,
+        show_legend = FALSE,
+        simple_anno_size = grid::unit(2, "mm")
+    )
+
+    # ============================================================
+    # 11. 绘制 inferCNV Heatmap
+    # ============================================================
+
+    ht <- ComplexHeatmap::Heatmap(
+        mat_plot,
+        name = "CNV",
+        col = col_fun,
+
+        cluster_rows = FALSE,
+        cluster_columns = FALSE,
+
+        show_row_names = FALSE,
+        show_column_names = FALSE,
+
+        row_split = group_factor,
+        column_split = chr_factor,
+
+        row_title = "%s",
+        row_title_side = "left",
+        row_title_rot = 0,
+        row_title_gp = grid::gpar(fontsize = 11, fontface = "bold"),
+
+        left_annotation = ha_left,
+
+        column_title = "%s",
+        column_title_side = "bottom",
+        column_title_gp = grid::gpar(fontsize = 11,fontface = "bold" ),
+
+        bottom_annotation = ha_bottom,
+
+        row_gap = grid::unit(2, "mm"),
+        column_gap = grid::unit(2, "mm"),
+
+        use_raster = TRUE,
+        raster_quality = 10
+    )
+
+    ht_drawn <- ComplexHeatmap::draw(ht,padding = grid::unit(c(10, 10, 10, 5),"mm"))
+
+    basicR::save_figure(obj = ht_drawn,
+                        filename = file.path(output_dir,"01_inferCNV_Heatmap"),
+                        width = 13,
+                        height = min(8,max(6,nrow(mat_plot) * 0.0005)),
+                        res = 600,
+                        formats = formats
+                       )
+
+    rm(ht, ht_drawn, mat_plot)
+    gc()
+
+    # ============================================================
+    # 12. 获取多个参考细胞的 CNV 表达矩阵
+    # ============================================================
+
+    cat("\n", yellow,"Calculating CNV scores...",reset, "\n")
+
+    # 支持 ref_name = c("Epi1", "Epi2")
+    ref_cells <- unlist(
+        infercnv_obj2@reference_grouped_cell_indices[
+            ref_name
+        ],
+        use.names = FALSE
+    )
+
+    ref_cells <- unique(as.integer(ref_cells))
+
+    if (length(ref_cells) == 0 ||
+        anyNA(ref_cells) ||
+        any(ref_cells < 1) ||
+        any(ref_cells > ncol(cnv_mat))) {
+        stop("Invalid reference cell indices.")
+    }
+
+    tmp <- cnv_mat[ , ref_cells, drop = FALSE]
+
+    if (ncol(tmp) < 2) {
+        stop("At least two reference cells are required.")
+    }
+
+    # ============================================================
+    # 13. 计算参考细胞 CNV 范围
+    # ============================================================
+
+    ref_gene_mean <- rowMeans(tmp)
+
+    ref_gene_sd <- apply(tmp,1,sd)
+
+    down <- mean(ref_gene_mean) - 2 * mean(ref_gene_sd)
+
+    up <- mean(ref_gene_mean) + 2 * mean(ref_gene_sd)
+
     oneCopy <- up - down
-    
+
     a2 <- down - oneCopy
     a3 <- up + oneCopy
 
-    cell_scores_CNV <- data.frame(
-        cnv_score = colSums( (cnv_mat >= a2 & cnv_mat < down) | (cnv_mat >= up & cnv_mat <= a3)) +
-        2 * colSums(cnv_mat < a2 | cnv_mat > a3)
-    ) %>% tibble::rownames_to_column("Cell")
+    rm(tmp, ref_gene_mean, ref_gene_sd)
+    gc()
+
+    # ============================================================
+    # 14. 计算全部细胞的 CNV score
+    # ============================================================
+
+    # 保持原函数的 CNV score 计算方式
+    # 分块计算以降低大矩阵的临时内存占用
+
+    cell_scores <- numeric(ncol(cnv_mat))
+
+    names(cell_scores) <- colnames(cnv_mat)
+
+    block_size <- 1000
+
+    for (start_idx in seq(1,ncol(cnv_mat),by = block_size)) {
+
+        end_idx <- min( start_idx + block_size - 1,ncol(cnv_mat))
+
+        idx <- start_idx:end_idx
+
+        block <- cnv_mat[,idx,drop = FALSE]
+
+        # 轻度 CNV 异常计 1 分
+        score1 <- colSums((block >= a2 & block < down) |(block >= up & block <= a3))
+
+        # 较强 CNV 异常计 2 分
+        score2 <- 2 * colSums(block < a2 | block > a3)
+
+        cell_scores[idx] <- score1 + score2
+    }
+
+    cell_scores_CNV <- data.frame(Cell = names(cell_scores),
+                                  cnv_score = as.numeric(cell_scores),
+                                  stringsAsFactors = FALSE
+                                 )
 
     df_cell_total_cnvScore <- merge(df_meta,cell_scores_CNV,by = "Cell")
-    write.csv(df_cell_total_cnvScore,file = file.path(output_dir,"02_Celltype_TotalCNV.csv"))
-    
-    ggplot(df_cell_total_cnvScore, aes(x = !!sym(celltype_col),y = cnv_score,color = !!sym(celltype_col))) +
+
+    write.csv(df_cell_total_cnvScore,file = file.path(output_dir,"02_Celltype_TotalCNV.csv"),row.names = FALSE)
+
+    # ============================================================
+    # 15. 绘制 CNV score 箱线图
+    # ============================================================
+
+    # 多个参考细胞类型共同计算参考中位数
+    ref_score_median <- median(
+        df_cell_total_cnvScore$cnv_score[
+            as.character(
+                df_cell_total_cnvScore[[celltype_col]]
+            ) %in% ref_name
+        ],
+        na.rm = TRUE
+    )
+
+    p <- ggplot(df_cell_total_cnvScore,aes(x = .data[[celltype_col]],y = cnv_score,color = .data[[celltype_col]])) +
         geom_boxplot() +
-        scale_color_manual(values = celltype_col_colors) +
-        geom_hline(yintercept = median(df_cell_total_cnvScore$cnv_score[df_cell_total_cnvScore[[celltype_col]] == ref_name]), linetype = "dashed", color = "grey70", size = 0.6) +
-        labs(y = "Total CNV score") +
-        theme_classic(base_size = 16) +
-        theme(axis.text.x = element_text(angle = 45,vjust = 1,hjust = 1,face = "bold"),
-              axis.text.y = element_text(,face = "bold"),
-              axis.title = element_text(size = 17,face = "bold"),
-              legend.position = "none"
-             ) -> p
+        scale_color_manual(values = group_color) +
+        geom_hline(yintercept = ref_score_median,linetype = "dashed",color = "grey70",linewidth = 0.6) +
+        labs(x = NULL,y = "Total CNV score") +
+        theme_classic( base_size = 16) +
+        theme(
+            axis.text.x = element_text(angle = 45,vjust = 1,hjust = 1,face = "bold"),
+            axis.text.y = element_text(face = "bold"),
+            axis.title = element_text(size = 17,face = "bold"),
+            legend.position = "none"
+        )
 
     basicR::save_figure(obj = p,
-                        filename =  file.path(output_dir, "02_Celltype_TotalCNV"),
+                        filename = file.path(output_dir,"02_Celltype_TotalCNV"),
                         width = 6,
                         height = 6,
                         res = 600,
-                        formats = formats  # "pdf","tiff","png","svg"
+                        formats = formats
                        )
+
+    cat("\n", green,"inferCNV analysis and plotting completed.",reset, "\n")
+
+    # 与原函数一致：结果主要保存到文件
+    # 额外以 invisible 方式返回 CNV score 数据
+    invisible(df_cell_total_cnvScore)
 }
