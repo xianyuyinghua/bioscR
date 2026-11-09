@@ -619,15 +619,17 @@ inferCNV_analysis <- function(seurat,
     # 15. 绘制 CNV score 箱线图
     # ============================================================
 
-    # 多个参考细胞类型共同计算参考中位数
-    ref_score_median <- median(
-        df_cell_total_cnvScore$cnv_score[
-            as.character(
-                df_cell_total_cnvScore[[celltype_col]]
-            ) %in% ref_name
-        ],
-        na.rm = TRUE
-    )
+    # 多个参考细胞类型：分别计算各自中位数，再取最小的那个
+    ref_score_medians <- sapply(ref_name, function(x) {
+        median(
+            df_cell_total_cnvScore$cnv_score[
+                as.character(df_cell_total_cnvScore[[celltype_col]]) == x
+            ],
+            na.rm = TRUE
+        )
+    })
+    
+    ref_score_median <- min(ref_score_medians, na.rm = TRUE)
 
     p <- ggplot(df_cell_total_cnvScore,aes(x = .data[[celltype_col]],y = cnv_score,color = .data[[celltype_col]])) +
         geom_boxplot() +
